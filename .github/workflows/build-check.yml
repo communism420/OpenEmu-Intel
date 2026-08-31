@@ -89,14 +89,20 @@ jobs:
           echo "cores=$cores" >> "$GITHUB_OUTPUT"
 
   build-cores:
-    name: Build core (${{ matrix.core }})
+    name: Build core (${{ matrix.core }}, ${{ matrix.arch }})
     needs: detect-core-changes
     if: needs.detect-core-changes.outputs.cores != '[]'
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         core: ${{ fromJson(needs.detect-core-changes.outputs.cores) }}
+        arch: [arm64, x86_64]
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
 
     steps:
       - name: Checkout repository
@@ -105,7 +111,7 @@ jobs:
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.5'
 
       - name: Clear SPM binary artifact cache
         run: rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts/
@@ -115,7 +121,7 @@ jobs:
           cp OpenEmu/ScreenScraperDevCredentials.template.swift OpenEmu/ScreenScraperDevCredentials.swift
           cp OpenEmu/OEGoogleDriveSecrets.template.swift OpenEmu/OEGoogleDriveSecrets.swift
 
-      - name: Build ${{ matrix.core }} (arm64)
+      - name: Build ${{ matrix.core }} (${{ matrix.arch }})
         run: |
           # Mednafen, SNES9x, and mGBA guard against Debug builds with a
           # #error ("Cores should not be compiled in DEBUG!") — they must
@@ -136,14 +142,33 @@ jobs:
             -workspace OpenEmu-metal.xcworkspace \
             -scheme "$scheme" \
             -configuration "$configuration" \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
+      - name: Verify core architecture (${{ matrix.arch }})
+        run: |
+          plugins=$(find "$RUNNER_TEMP/OpenEmuDerivedData/Build/Products" -name '*.oecoreplugin' -type d -print)
+          test -n "$plugins"
+          while IFS= read -r plugin; do
+            ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$plugin"
+          done <<< "$plugins"
+
   build:
-    name: Build (arm64)
-    runs-on: macos-latest
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
 
     steps:
       - name: Checkout repository
@@ -152,7 +177,7 @@ jobs:
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.5'
 
       - name: Clear SPM binary artifact cache
         run: rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts/
@@ -162,23 +187,32 @@ jobs:
           cp OpenEmu/ScreenScraperDevCredentials.template.swift OpenEmu/ScreenScraperDevCredentials.swift
           cp OpenEmu/OEGoogleDriveSecrets.template.swift OpenEmu/OEGoogleDriveSecrets.swift
 
-      - name: Build OpenEmu (Debug, arm64)
+      - name: Build OpenEmu (Debug, ${{ matrix.arch }})
         run: |
           xcodebuild build \
             -workspace OpenEmu-metal.xcworkspace \
             -scheme OpenEmu \
             -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Verify app architecture (${{ matrix.arch }})
+        run: ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/Debug/OpenEmu.app"
 
       - name: Run OpenEmuBaseTests (incl. RA hardcore regression suite)
         run: |
           xcodebuild test \
             -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj \
             -scheme OpenEmuBase \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuBaseDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
