@@ -354,8 +354,16 @@ jobs:
             -target OEAlertTest \
             "${common_settings[@]}"
 
+          shader_project=OpenEmu-Shaders/OpenEmuShaders.xcodeproj
           xcodebuild build \
-            -project OpenEmu-Shaders/OpenEmuShaders.xcodeproj \
+            -workspace OpenEmu-metal.xcworkspace \
+            -scheme OpenEmuShaders \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            "${common_settings[@]}" \
+            MACOSX_DEPLOYMENT_TARGET=11.0
+
+          xcodebuild build \
+            -project "$shader_project" \
             -target oeshaders \
             "${common_settings[@]}" \
             MACOSX_DEPLOYMENT_TARGET=11.0
