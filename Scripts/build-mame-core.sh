@@ -59,6 +59,7 @@ if [[ -z "${MAME_BUILD_NO_REEXEC:-}" && "$REPO_ROOT" =~ [[:space:]] ]]; then
   file "$PLUGIN/Contents/MacOS/MAME"
   file "$PLUGIN/Contents/Frameworks/mamearcade_headless.dylib"
   "$SCRIPT_DIR/verify-bundle-architectures.sh" --arch "$TARGET_ARCH" "$PLUGIN"
+  codesign --verify --deep --strict "$PLUGIN"
   exit 0
 fi
 
@@ -79,6 +80,8 @@ xcodebuild \
   -derivedDataPath "$DD" \
   -destination "platform=macOS,arch=$TARGET_ARCH" \
   ONLY_ACTIVE_ARCH=YES ARCHS="$TARGET_ARCH" \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM="" \
   build
 
 xcodebuild \
@@ -88,6 +91,8 @@ xcodebuild \
   -derivedDataPath "$DD" \
   -destination "platform=macOS,arch=$TARGET_ARCH" \
   ONLY_ACTIVE_ARCH=YES ARCHS="$TARGET_ARCH" \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM="" \
   build
 
 PLUGIN="$DD/Build/Products/Release/MAME.oecoreplugin"
@@ -97,3 +102,4 @@ echo "Built: $PLUGIN"
 file "$PLUGIN/Contents/MacOS/MAME"
 file "$PLUGIN/Contents/Frameworks/mamearcade_headless.dylib"
 "$SCRIPT_DIR/verify-bundle-architectures.sh" --arch "$TARGET_ARCH" "$PLUGIN"
+codesign --verify --deep --strict "$PLUGIN"

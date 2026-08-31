@@ -2,6 +2,8 @@ name: Build Check
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -41,12 +43,9 @@ jobs:
         run: |
           # Most cores build through the "OpenEmu + <Name>" combined scheme.
           # DeSmuME and Dolphin only have a bare "<Name>" scheme — the Build
-          # step below picks the right one per core. MAME also has a bare
-          # scheme but isn't listed here: its build is currently broken
-          # (missing deps/mame/src/osd/headless/public headers) and its
-          # deps/mame source is deliberately not vendored into this repo
-          # (see MAME/README.md) — it needs its own clone-and-build CI job,
-          # not a slot in this xcodebuild matrix. Tracked separately.
+          # step below picks the right one per core. MAME is deliberately not
+          # listed here because its source is fetched and compiled by the
+          # dedicated build-mame job below.
           all_cores='["4DO","Atari800","Bliss","BSNES","CrabEmu","DeSmuME","Dolphin","FCEU","Flycast","Gambatte","GenesisPlus","JollyCV","Mednafen","mGBA","Mupen64Plus","Nestopia","O2EM","Picodrive","PokeMini","Potator","PPSSPP","ProSystem","SNES9x","Stella","VecXGL","VirtualJaguar","blueMSX"]'
 
           # A couple of core scheme names don't match their top-level
@@ -56,7 +55,8 @@ jobs:
           core_dirs_json='{"Potator":"Potator-Core","Picodrive":"picodrive"}'
 
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            # Manual workflow_dispatch run has no PR base to diff against — build everything.
+            # Push and workflow_dispatch runs have no PR base to diff against —
+            # build every core and validate the vendored framework sources.
             echo "Not a pull_request event — building all core schemes"
             cores="$all_cores"
           else
@@ -79,7 +79,20 @@ jobs:
           all_cores = json.loads(os.environ['ALL_CORES'])
           core_dirs = json.loads(os.environ['CORE_DIRS'])
           changed = os.environ['CHANGED_FILES'].splitlines()
-          selected = [c for c in all_cores if any(f.startswith(core_dirs.get(c, c) + '/') for f in changed)]
+          selected_names = {
+              c for c in all_cores
+              if any(f.startswith(core_dirs.get(c, c) + '/') for f in changed)
+          }
+
+          # These plugins compile the shared rcheevos source directly into
+          # their own bundle, so a Vendor/rcheevos change must rebuild them.
+          if any(f.startswith('Vendor/rcheevos/') for f in changed):
+              selected_names.update([
+                  'BSNES', 'FCEU', 'Gambatte', 'GenesisPlus', 'Mednafen',
+                  'mGBA', 'Mupen64Plus', 'Nestopia', 'SNES9x',
+              ])
+
+          selected = [c for c in all_cores if c in selected_names]
           print(json.dumps(selected))
           ")
             fi
@@ -123,14 +136,6 @@ jobs:
 
       - name: Build ${{ matrix.core }} (${{ matrix.arch }})
         run: |
-          # Mednafen, SNES9x, and mGBA guard against Debug builds with a
-          # #error ("Cores should not be compiled in DEBUG!") — they must
-          # be built Release, unlike every other core in this matrix.
-          case "${{ matrix.core }}" in
-            Mednafen|SNES9x|mGBA) configuration=Release ;;
-            *) configuration=Debug ;;
-          esac
-
           # Most cores build through the "OpenEmu + <Name>" combined scheme.
           # DeSmuME and Dolphin only have a bare "<Name>" scheme.
           case "${{ matrix.core }}" in
@@ -141,14 +146,16 @@ jobs:
           xcodebuild build \
             -workspace OpenEmu-metal.xcworkspace \
             -scheme "$scheme" \
-            -configuration "$configuration" \
+            -configuration Release \
             -destination 'platform=macOS,arch=${{ matrix.arch }}' \
             -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
             ARCHS='${{ matrix.arch }}' \
             ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=""
 
       - name: Verify core architecture (${{ matrix.arch }})
         run: |
@@ -156,7 +163,134 @@ jobs:
           test -n "$plugins"
           while IFS= read -r plugin; do
             ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$plugin"
+            codesign --verify --deep --strict "$plugin"
           done <<< "$plugins"
+
+  build-mame:
+    # MAME's pinned source checkout is about 1 GB even when shallow, and the
+    # arcade build takes substantially longer than an ordinary core. Keep it
+    # out of the xcodebuild matrix so both native architectures are explicit
+    # required checks and can have an appropriate timeout and source cache.
+    name: Build core (MAME, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+
+      # Restore and save only the prepared source, before make creates any
+      # architecture-specific objects. Separate keys avoid concurrent cache
+      # writers and ensure an Intel build can never inherit ARM intermediates.
+      - name: Restore prepared MAME source
+        id: mame-source-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: MAME/deps/mame
+          key: mame-source-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('MAME/deps-mame-revision.txt', 'MAME/patches/**', 'Scripts/prepare-mame-core.sh') }}
+
+      - name: Prepare MAME source
+        run: |
+          ./Scripts/prepare-mame-core.sh
+          du -sh MAME/deps/mame
+          df -h "$RUNNER_TEMP"
+
+      - name: Save prepared MAME source
+        if: steps.mame-source-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: MAME/deps/mame
+          key: ${{ steps.mame-source-cache.outputs.cache-primary-key }}
+
+      - name: Build MAME (${{ matrix.arch }})
+        # A one-commit checkout has no reachable tag for `git describe`.
+        # MAME supports IGNORE_GIT for this case; the core's version remains
+        # the pinned 0.250 value from its project and Info.plist.
+        env:
+          IGNORE_GIT: '1'
+        run: ./Scripts/build-mame-core.sh --arch '${{ matrix.arch }}'
+
+      - name: Verify MAME architecture (${{ matrix.arch }})
+        run: |
+          plugin=MAME/build/XcodeDerived/Build/Products/Release/MAME.oecoreplugin
+          ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$plugin"
+          codesign --verify --deep --strict "$plugin"
+
+  build-vendor-frameworks:
+    name: Build vendor frameworks (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+
+      - name: Build XADMaster and UniversalDetector (Release, ${{ matrix.arch }})
+        run: |
+          xcodebuild build \
+            -project Vendor/XADMaster/XADMaster.xcodeproj \
+            -scheme XADMaster \
+            -configuration Release \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/VendorDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
+            MACOSX_DEPLOYMENT_TARGET=11.0 \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=""
+
+      - name: Verify vendor framework architectures (${{ matrix.arch }})
+        run: |
+          for framework in XADMaster UniversalDetector; do
+            bundle="$RUNNER_TEMP/VendorDerivedData/Build/Products/Release/$framework.framework"
+            ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$bundle"
+            codesign --verify --deep --strict "$bundle"
+          done
+
+      - name: Run XADMasterTests (${{ matrix.arch }})
+        run: |
+          xcodebuild test \
+            -project Vendor/XADMaster/XADMaster.xcodeproj \
+            -scheme XADMaster \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/VendorDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
+            MACOSX_DEPLOYMENT_TARGET=11.0 \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM=""
 
   build:
     name: Build (${{ matrix.arch }})
@@ -197,22 +331,117 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
             ARCHS='${{ matrix.arch }}' \
             ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=""
 
-      - name: Verify app architecture (${{ matrix.arch }})
+      - name: Verify app architecture (Debug, ${{ matrix.arch }})
         run: ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/Debug/OpenEmu.app"
 
-      - name: Run OpenEmuBaseTests (incl. RA hardcore regression suite)
+      - name: Analyze OpenEmu (Debug, ${{ matrix.arch }})
         run: |
-          xcodebuild test \
-            -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj \
-            -scheme OpenEmuBase \
+          xcodebuild analyze \
+            -workspace OpenEmu-metal.xcworkspace \
+            -scheme OpenEmu \
+            -configuration Debug \
             -destination 'platform=macOS,arch=${{ matrix.arch }}' \
-            -derivedDataPath "$RUNNER_TEMP/OpenEmuBaseDerivedData" \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
             ARCHS='${{ matrix.arch }}' \
             ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            DEVELOPMENT_TEAM=""
+
+      - name: Build OpenEmu (Release, ${{ matrix.arch }})
+        run: |
+          xcodebuild build \
+            -workspace OpenEmu-metal.xcworkspace \
+            -scheme OpenEmu \
+            -configuration Release \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM=""
+
+      - name: Verify app architecture (Release, ${{ matrix.arch }})
+        run: ./Scripts/verify-bundle-architectures.sh --arch '${{ matrix.arch }}' "$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/Release/OpenEmu.app"
+
+      - name: Build auxiliary tools (Release, ${{ matrix.arch }})
+        run: |
+          xcodebuild build \
+            -project OpenEmu/OpenEmu.xcodeproj \
+            -scheme OEControlLabelsGenerator \
+            -configuration Release \
+            -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+            -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
+            ARCHS='${{ matrix.arch }}' \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM=""
+
+          tool="$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/Release/OEControlLabelsGenerator"
+          lipo "$tool" -verify_arch '${{ matrix.arch }}'
+          codesign --verify --strict "$tool"
+
+      - name: Validate metadata and code signatures (${{ matrix.arch }})
+        run: |
+          plutil -lint \
+            OpenEmu/OpenEmu-Info.plist \
+            OpenEmu/OpenEmu.entitlements \
+            OpenEmu/OpenEmuHelperApp/OpenEmuHelperApp-Info.plist \
+            OpenEmu/OpenEmuHelperApp/OpenEmuHelperApp.entitlements
+
+          for configuration in Debug Release; do
+            app="$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/$configuration/OpenEmu.app"
+            codesign --verify --deep --strict "$app"
+          done
+
+      - name: Run component tests (${{ matrix.arch }})
+        run: |
+          failures=0
+
+          run_tests() {
+            container_kind="$1"
+            container_path="$2"
+            scheme="$3"
+
+            echo "Testing $scheme (${{ matrix.arch }})"
+            if ! xcodebuild test \
+              "-$container_kind" "$container_path" \
+              -scheme "$scheme" \
+              -configuration Debug \
+              -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+              -derivedDataPath "$RUNNER_TEMP/OpenEmuDerivedData" \
+              ARCHS='${{ matrix.arch }}' \
+              ONLY_ACTIVE_ARCH=YES \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_ALLOWED=YES \
+              CODE_SIGNING_REQUIRED=NO \
+              DEVELOPMENT_TEAM=""; then
+              failures=$((failures + 1))
+            fi
+          }
+
+          run_tests workspace OpenEmu-metal.xcworkspace OpenEmu
+          run_tests project OpenEmuKit/OpenEmuKit.xcodeproj OpenEmuKit
+          run_tests project OpenEmu-SDK/OpenEmu-SDK.xcodeproj OpenEmuBase
+          run_tests project OpenEmu-SDK/OpenEmu-SDK.xcodeproj OpenEmuSystem
+          run_tests project OpenEmu-Shaders/OpenEmuShaders.xcodeproj OpenEmuShaders
+
+          if [ "$failures" -ne 0 ]; then
+            echo "::error::$failures component test scheme(s) failed"
+            exit 1
+          fi
