@@ -137,10 +137,17 @@ jobs:
       - name: Build ${{ matrix.core }} (${{ matrix.arch }})
         run: |
           # Most cores build through the "OpenEmu + <Name>" combined scheme.
+          # CI verifies the host app separately, so remove only its BuildAction
+          # entry from the checkout copy instead of rebuilding it for every
+          # core. The scheme's LaunchAction remains unchanged for developers.
           # DeSmuME and Dolphin only have a bare "<Name>" scheme.
           case "${{ matrix.core }}" in
             DeSmuME|Dolphin) scheme="${{ matrix.core }}" ;;
-            *) scheme="OpenEmu + ${{ matrix.core }}" ;;
+            *)
+              scheme="OpenEmu + ${{ matrix.core }}"
+              ./Scripts/prepare-core-ci-scheme.py \
+                "OpenEmu-metal.xcworkspace/xcshareddata/xcschemes/${scheme}.xcscheme"
+              ;;
           esac
 
           xcodebuild build \
@@ -291,6 +298,133 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGNING_REQUIRED=NO \
             DEVELOPMENT_TEAM=""
+
+  build-auxiliary-tools:
+    # These release tools and public SPIR-V schemes are not dependencies of
+    # the main OpenEmu scheme, so verify them explicitly on both native CPUs.
+    name: Build auxiliary tools (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-26
+          - arch: x86_64
+            runner: macos-26-intel
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.5'
+
+      - name: Clear SPM binary artifact cache
+        run: rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts/
+
+      - name: Build auxiliary targets (Release, ${{ matrix.arch }})
+        run: |
+          product_root="$RUNNER_TEMP/AuxiliaryBuild"
+          object_root="$RUNNER_TEMP/AuxiliaryIntermediates"
+          common_settings=(
+            -configuration Release
+            -sdk macosx
+            ARCHS='${{ matrix.arch }}'
+            ONLY_ACTIVE_ARCH=YES
+            SYMROOT="$product_root"
+            OBJROOT="$object_root"
+            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_IDENTITY="-"
+            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_ALLOWED=YES
+            DEVELOPMENT_TEAM=""
+          )
+
+          # These products have targets but no shared schemes.
+          xcodebuild build \
+            -project OpenEmu/OpenEmu.xcodeproj \
+            -target OECoreListUpdater \
+            "${common_settings[@]}"
+
+          xcodebuild build \
+            -project OpenEmu/OpenEmu.xcodeproj \
+            -target OEAlertTest \
+            "${common_settings[@]}"
+
+          xcodebuild build \
+            -project OpenEmu-Shaders/OpenEmuShaders.xcodeproj \
+            -target oeshaders \
+            "${common_settings[@]}" \
+            MACOSX_DEPLOYMENT_TARGET=11.0
+
+          spirv_project=OpenEmu-Shaders/3rdparty/SPIRV/SPIRV.xcodeproj
+          xcodebuild build \
+            -project "$spirv_project" \
+            -target SPIRVCross \
+            "${common_settings[@]}" \
+            MACOSX_DEPLOYMENT_TARGET=11.0
+
+          # Build the three shared macOS schemes that are not reached by the
+          # OpenEmuShaders framework target. Reuse products and intermediates
+          # from the oeshaders build to avoid recompiling their C libraries.
+          for scheme in GLSLang SPIRVTools testcli; do
+            xcodebuild build \
+              -project "$spirv_project" \
+              -scheme "$scheme" \
+              -destination 'platform=macOS,arch=${{ matrix.arch }}' \
+              "${common_settings[@]}" \
+              MACOSX_DEPLOYMENT_TARGET=11.0
+          done
+
+      - name: Verify auxiliary architectures (${{ matrix.arch }})
+        run: |
+          release_dir="$RUNNER_TEMP/AuxiliaryBuild/Release"
+          for product in \
+            OECoreListUpdater \
+            oeshaders \
+            libGLSLang.a \
+            libSPIRVCross.a \
+            libSPIRVTools.a \
+            testcli
+          do
+            product_path="$release_dir/$product"
+            test -f "$product_path"
+            lipo "$product_path" -verify_arch '${{ matrix.arch }}'
+          done
+
+          # The shader tools bring framework dependencies into this product
+          # tree. Check the primary products, then every embedded copy.
+          for framework in OpenEmuShaders SPIRV; do
+            test -d "$release_dir/$framework.framework"
+          done
+          ./Scripts/verify-bundle-architectures.sh \
+            --arch '${{ matrix.arch }}' \
+            "$release_dir/OEAlertTest.app"
+          framework_count=0
+          while IFS= read -r framework_path; do
+            ./Scripts/verify-bundle-architectures.sh \
+              --arch '${{ matrix.arch }}' \
+              "$framework_path"
+            framework_count=$((framework_count + 1))
+          done < <(find "$RUNNER_TEMP/AuxiliaryBuild" -type d -name '*.framework' -print)
+          test "$framework_count" -ge 2
+
+      - name: Verify auxiliary code signatures
+        run: |
+          release_dir="$RUNNER_TEMP/AuxiliaryBuild/Release"
+          for executable in OECoreListUpdater oeshaders testcli; do
+            codesign --verify --strict "$release_dir/$executable"
+          done
+          codesign --verify --deep --strict "$release_dir/OEAlertTest.app"
+          framework_count=0
+          while IFS= read -r framework_path; do
+            codesign --verify --deep --strict "$framework_path"
+            framework_count=$((framework_count + 1))
+          done < <(find "$RUNNER_TEMP/AuxiliaryBuild" -type d -name '*.framework' -print)
+          test "$framework_count" -ge 2
 
   build:
     name: Build (${{ matrix.arch }})
