@@ -38,6 +38,7 @@
 		04E8607DB95F7E7A0C755689 /* flycast/core/deps/libzip/lib/zip_source_rollback_write.c in Sources */ = {isa = PBXBuildFile; fileRef = 355B6F6FA83FC708E728FA23 /* flycast/core/deps/libzip/lib/zip_source_rollback_write.c */; };
 		051503BE80040C123CC166DB /* flycast/core/deps/vixl/aarch64/simulator-aarch64.cc in Sources */ = {isa = PBXBuildFile; fileRef = CD81DDE02C0E3B709891133F /* flycast/core/deps/vixl/aarch64/simulator-aarch64.cc */; };
 		05E66FF86C459225F0C6DAB5 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c in Sources */ = {isa = PBXBuildFile; fileRef = 6BCB6F4209F0577703351B46 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c */; };
+		6A4F9D2B3C7E81F015A6B4C2 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S in Sources */ = {isa = PBXBuildFile; fileRef = E6A9C4F72D8B1305A64E9C7F /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S */; };
 		065B59CD2E7C81D6ABC7FC4F /* flycast/core/deps/libzip/lib/zip_fopen_index_encrypted.c in Sources */ = {isa = PBXBuildFile; fileRef = 6C22F625C21055C2E87F8202 /* flycast/core/deps/libzip/lib/zip_fopen_index_encrypted.c */; };
 		06BA153F94935613F1CF06F6 /* flycast/core/deps/libzip/lib/zip_open.c in Sources */ = {isa = PBXBuildFile; fileRef = 1D4F5045ABCBD3F7D30312B6 /* flycast/core/deps/libzip/lib/zip_open.c */; };
 		06DB20AD6DD89E07FF5C2B24 /* flycast/core/deps/libzip/lib/zip_dir_add.c in Sources */ = {isa = PBXBuildFile; fileRef = 7D506D22218CD035CABC28FA /* flycast/core/deps/libzip/lib/zip_dir_add.c */; };
@@ -727,6 +728,7 @@
 		6AFF0E8759887496C5D24C47 /* flycast/core/deps/libzip/lib/zip_fopen.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = flycast/core/deps/libzip/lib/zip_fopen.c; sourceTree = SOURCE_ROOT; };
 		6B419A2815F9D8DE6174EE27 /* flycast/core/rend/TexCache.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = flycast/core/rend/TexCache.cpp; sourceTree = SOURCE_ROOT; };
 		6BCB6F4209F0577703351B46 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c"; sourceTree = SOURCE_ROOT; };
+		E6A9C4F72D8B1305A64E9C7F /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.asm; path = "flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S"; sourceTree = SOURCE_ROOT; };
 		6BF7E5974C8FC31218B24ABA /* flycast/core/ui/gui_cheats.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = flycast/core/ui/gui_cheats.cpp; sourceTree = SOURCE_ROOT; };
 		6C22F625C21055C2E87F8202 /* flycast/core/deps/libzip/lib/zip_fopen_index_encrypted.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = flycast/core/deps/libzip/lib/zip_fopen_index_encrypted.c; sourceTree = SOURCE_ROOT; };
 		6D217AA8475665E85BEE8514 /* flycast/core/deps/libzip/lib/zip_source_compress.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = flycast/core/deps/libzip/lib/zip_source_compress.c; sourceTree = SOURCE_ROOT; };
@@ -1185,6 +1187,7 @@
 				FB0A82645271C32F3E1530E6 /* flycast/core/hw/naomi/hopper.cpp */,
 				E2BEEBE6EDA472F9F30DE3F1 /* flycast/core/oslib/http_client.cpp */,
 				6BCB6F4209F0577703351B46 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c */,
+				E6A9C4F72D8B1305A64E9C7F /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S */,
 				B0F6E0D7BE2A892F8D4B11EA /* flycast/core/oslib/i18n.cpp */,
 				2876AA00DEC34D13ACE1DCBE /* flycast/core/deps/tinygettext/src/iconv.cpp */,
 				89C53950C175E9EC702C6E5F /* flycast/core/imgread/ImgReader.cpp */,
@@ -1656,6 +1659,7 @@
 				573CE048F9FAC9C02CF4428E /* flycast/core/hw/naomi/hopper.cpp in Sources */,
 				85E0AB338DE566AC489A623D /* flycast/core/oslib/http_client.cpp in Sources */,
 				05E66FF86C459225F0C6DAB5 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress.c in Sources */,
+				6A4F9D2B3C7E81F015A6B4C2 /* flycast/core/deps/libchdr/deps/zstd-1.5.6/lib/decompress/huf_decompress_amd64.S in Sources */,
 				3D4D352A8E3E1D4F5EC2627D /* flycast/core/oslib/i18n.cpp in Sources */,
 				038474AD03B9D3C8D96E82EE /* (null) in Sources */,
 				41DC47EC5E6F8285A70A47A7 /* (null) in Sources */,
