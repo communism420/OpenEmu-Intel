@@ -2,13 +2,25 @@ name: Build Check
 
 on:
   workflow_dispatch:
+    inputs:
+      package_intel:
+        description: Build a downloadable Intel test app with all 28 native cores
+        type: boolean
+        default: false
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
+  intel-test-build:
+    if: inputs.package_intel == true
+    uses: ./.github/workflows/intel-test-build.yml
+    permissions:
+      contents: read
+
   core-sources:
+    if: inputs.package_intel != true
     # Fast guard (no Xcode): catches a flattened core submodule that was
     # committed without its vendored upstream source — the regression that
     # silently broke the Dolphin build for months because CI never compiled it.
@@ -23,6 +35,7 @@ jobs:
         run: ./Scripts/check-core-sources.sh
 
   detect-core-changes:
+    if: inputs.package_intel != true
     # The `OpenEmu` scheme only builds the main app plus its own dependencies
     # (OpenEmuKit/Base/System) — it never compiles core plugins, so a PR that
     # only touches a core could go green without a single changed line being
@@ -174,6 +187,7 @@ jobs:
           done <<< "$plugins"
 
   build-mame:
+    if: inputs.package_intel != true
     # MAME's pinned source checkout is about 1 GB even when shallow, and the
     # arcade build takes substantially longer than an ordinary core. Keep it
     # out of the xcodebuild matrix so both native architectures are explicit
@@ -237,6 +251,7 @@ jobs:
           codesign --verify --deep --strict "$plugin"
 
   build-vendor-frameworks:
+    if: inputs.package_intel != true
     name: Build vendor frameworks (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -300,6 +315,7 @@ jobs:
             DEVELOPMENT_TEAM=""
 
   build-auxiliary-tools:
+    if: inputs.package_intel != true
     # These release tools and public SPIR-V schemes are not dependencies of
     # the main OpenEmu scheme, so verify them explicitly on both native CPUs.
     name: Build auxiliary tools (${{ matrix.arch }})
@@ -435,6 +451,7 @@ jobs:
           test "$framework_count" -ge 2
 
   build:
+    if: inputs.package_intel != true
     name: Build (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
