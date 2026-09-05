@@ -57,6 +57,10 @@ private struct DataFolderSetupSmokeTests {
         check(CommandLine.arguments.count == 2, "explicit isolated temporary directory required")
         let workspace = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         let fm = FileManager.default
+        check(OEDataFolderSetup.locatorDefaults(for: OEDataFolderSetup.bootstrapDomain) === UserDefaults.standard,
+              "Release uses its standard domain instead of an invalid same-name suite")
+        check(OEDataFolderSetup.locatorDefaults(for: "org.openemu.OpenEmu.debug") != nil,
+              "Debug can open the shared Release locator domain")
         func directory(_ name: String) throws -> URL {
             let url = workspace.appendingPathComponent(name, isDirectory: true)
             try fm.createDirectory(at: url, withIntermediateDirectories: false)

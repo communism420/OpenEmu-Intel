@@ -96,7 +96,10 @@ enum OEDataFolderSetup {
         // Debug has a different bundle identifier, but both app variants and
         // the core install scripts must find the same chosen data folder.
         // Only these locator values use the shared macOS preferences domain.
-        guard let defaults = UserDefaults(suiteName: bootstrapDomain) else {
+        // Foundation rejects a suite whose name is the active app's own
+        // bundle identifier. Release already uses this domain as standard;
+        // only Debug needs to open the shared Release domain as another suite.
+        guard let defaults = locatorDefaults(for: Bundle.main.bundleIdentifier) else {
             FileHandle.standardError.write(Data("OpenEmu could not open its data-folder locator.\n".utf8))
             exit(EXIT_FAILURE)
         }
@@ -176,6 +179,11 @@ enum OEDataFolderSetup {
         } else {
             chooseFolder(expectedID: nil, defaults: defaults)
         }
+    }
+
+    static func locatorDefaults(for bundleIdentifier: String?) -> UserDefaults? {
+        if bundleIdentifier == bootstrapDomain { return .standard }
+        return UserDefaults(suiteName: bootstrapDomain)
     }
 
     private static func chooseFolder(expectedID: UUID?, defaults: UserDefaults) {
