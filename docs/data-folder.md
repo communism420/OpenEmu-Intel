@@ -50,7 +50,7 @@ OpenEmu searches the selected folder's `Cores/` before the app's bundled cores. 
 
 A new empty data folder does not import installed cores from the old `~/Library/Application Support/OpenEmu/Cores/` directory. Cores bundled with the particular app build remain available; additional cores must be installed into the selected folder. The usual architecture checks and update-channel rules still apply. This feature does not change a core's update feed or automatically make every core newer.
 
-“Freshly built” means compiled from the source revision used for that build. It does not mean updated to the latest upstream emulator release. For a test result, use the install/preflight commands below and inspect `Logs/core-inventory.txt` for the resolved plugin path. A successful startup check is not a game-compatibility test.
+“Freshly built” means compiled from the source revision used for that build. It does not mean updated to the latest upstream emulator release. For a test result, use the install/preflight commands below. `Logs/core-inventory.txt` lists discovered plugin names, identifiers and systems, not executable paths or proof that a core ran a game. A successful startup check is not a game-compatibility test.
 
 ## Files and settings macOS still owns
 
@@ -121,7 +121,7 @@ First finish the isolated launch above and quit OpenEmu. The folder must now hav
   --derived-data "$data_folder_build" --data-folder "$data_folder_smoke"
 ```
 
-Run the preflight again after any rebuild and require `OK` before reporting a game test. Never merge bundle directories using `cp -Rf`. Relaunch the app with the same `--data-folder`, use your own legally obtained test game and any required BIOS/SBI files, and check the intended core's path in the inventory. `verify.sh --core --launch` does not run an app smoke launch; launch the app separately as shown above.
+Run the preflight again after any rebuild and require `OK` before reporting a game test. Never merge bundle directories using `cp -Rf`. Relaunch the app with the same `--data-folder`, use your own legally obtained test game and any required BIOS/SBI files, and check that the intended core appears in the inventory. Its installed path and match with the build are checked by the preflight, not the inventory. `verify.sh --core --launch` does not run an app smoke launch; launch the app separately as shown above.
 
 Without `--data-folder`, the install and preflight scripts use OpenEmu's remembered path and check its marker. They use the old Application Support location only when no data-folder locator keys exist at all, for compatibility with older app builds. A remembered but unavailable or mismatched folder is an error. The scripts do not resolve a moved bookmark themselves: open OpenEmu to recover its location, or pass the identified folder explicitly. Without `--derived-data`, the scripts search their usual build locations, so explicit paths are preferable for isolated tests.
 
