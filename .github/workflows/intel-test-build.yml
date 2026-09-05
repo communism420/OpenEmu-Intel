@@ -2,18 +2,110 @@ name: Intel test build
 
 on:
   workflow_call:
+    inputs:
+      reuse_run:
+        description: Original packaging run whose successful inputs should be reused
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  plan:
+    name: Select Intel build inputs
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      app: ${{ steps.plan.outputs.app }}
+      cores: ${{ steps.plan.outputs.cores }}
+      mame: ${{ steps.plan.outputs.mame }}
+    steps:
+      - name: Find missing inputs from the original source revision
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_SHA: ${{ github.sha }}
+          REUSE_RUN: ${{ inputs.reuse_run }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          repo = os.environ['REPOSITORY']
+          reuse = os.environ['REUSE_RUN']
+          source_sha = os.environ['CURRENT_SHA']
+          names = set()
+          cores = '4DO Atari800 Bliss BSNES CrabEmu DeSmuME Dolphin FCEU Flycast Gambatte GenesisPlus JollyCV Mednafen mGBA Mupen64Plus Nestopia O2EM Picodrive PokeMini Potator PPSSPP ProSystem SNES9x Stella VecXGL VirtualJaguar blueMSX'.split()
+
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', path]))
+
+          if reuse:
+              if not re.fullmatch(r'[1-9][0-9]*', reuse):
+                  raise SystemExit('reuse_run must be a numeric GitHub run ID')
+              run = api(f'repos/{repo}/actions/runs/{reuse}')
+              if (run['status'] != 'completed'
+                  or run['event'] != 'workflow_dispatch'
+                  or run['path'] != '.github/workflows/build-check.yml'
+                  or run['head_repository']['id'] != run['repository']['id']):
+                  raise SystemExit('Reuse requires a completed manual build in this repository')
+              source_sha = run['head_sha']
+              artifacts = api(f'repos/{repo}/actions/runs/{reuse}/artifacts?per_page=100')
+              if artifacts['total_count'] > 100:
+                  raise SystemExit('Unexpected artifact count; inspect the original run')
+              if any(a['name'] == 'intel-recovery-source' for a in artifacts['artifacts']):
+                  raise SystemExit('Select the original full build, not a recovery run')
+              if any(a['expired'] and (a['name'] == 'intel-app' or a['name'].startswith('intel-core-'))
+                     for a in artifacts['artifacts']):
+                  raise SystemExit('Intel inputs expired; start a new full build')
+              for artifact in artifacts['artifacts']:
+                  if not artifact['expired']:
+                      names.add(artifact['name'])
+              if not any(n == 'intel-app' or n.startswith('intel-core-') for n in names):
+                  raise SystemExit('No reusable Intel inputs remain in the selected run')
+
+          if not re.fullmatch(r'[0-9a-f]{40}', source_sha):
+              raise SystemExit('Invalid source commit')
+          outputs = {
+              'source_sha': source_sha,
+              'app': str('intel-app' not in names).lower(),
+              'cores': json.dumps([c for c in cores if f'intel-core-{c}' not in names]),
+              'mame': str('intel-core-MAME' not in names).lower(),
+          }
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for key, value in outputs.items():
+                  print(f'{key}={value}', file=output)
+          if reuse:
+              with open(os.path.join(os.environ['RUNNER_TEMP'], 'intel-recovery-source.txt'), 'w') as marker:
+                  print(f'Original run: {reuse}\nSource commit: {source_sha}', file=marker)
+          print(json.dumps(outputs, indent=2))
+          PY
+
+      - name: Record recovery provenance
+        if: inputs.reuse_run != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: intel-recovery-source
+          path: ${{ runner.temp }}/intel-recovery-source.txt
+          if-no-files-found: error
+          retention-days: 14
+
   app:
     name: Package Intel app
+    needs: plan
+    if: needs.plan.outputs.app == 'true'
     runs-on: macos-26-intel
     timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -61,15 +153,21 @@ jobs:
 
   cores:
     name: Package Intel core (${{ matrix.core }})
+    needs: plan
+    if: needs.plan.outputs.cores != '[]'
     runs-on: macos-26-intel
-    timeout-minutes: 90
+    # Combined schemes can still include the host app; allow slow Intel runners
+    # enough time to finish that work as well as the core.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        core: [4DO, Atari800, Bliss, BSNES, CrabEmu, DeSmuME, Dolphin, FCEU, Flycast, Gambatte, GenesisPlus, JollyCV, Mednafen, mGBA, Mupen64Plus, Nestopia, O2EM, Picodrive, PokeMini, Potator, PPSSPP, ProSystem, SNES9x, Stella, VecXGL, VirtualJaguar, blueMSX]
+        core: ${{ fromJson(needs.plan.outputs.cores) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -87,9 +185,31 @@ jobs:
       - name: Build Intel core
         env:
           CORE: ${{ matrix.core }}
+          REUSE_RUN: ${{ inputs.reuse_run }}
         run: |
-          # Match the proven build-check scheme selection, without rebuilding
-          # the host app in each core job. These edits stay in the CI checkout.
+          # Recovery avoids rebuilding the host app that was already saved.
+          # These two explicit targets have no dependency on the app target.
+          if [ -n "$REUSE_RUN" ] && [ "$CORE" = Mupen64Plus ]; then
+            mupen_build="$RUNNER_TEMP/OpenEmuDerivedData/Build"
+            common=(
+              -configuration Release -sdk macosx -jobs 2
+              ARCHS=x86_64 ONLY_ACTIVE_ARCH=YES
+              CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-
+              CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+              "SYMROOT=$mupen_build/Products"
+              "OBJROOT=$mupen_build/Intermediates"
+              "CONFIGURATION_BUILD_DIR=$mupen_build/Products/Release"
+            )
+            xcodebuild build -project OpenEmu-SDK/OpenEmu-SDK.xcodeproj \
+              -target OpenEmuBase "${common[@]}"
+            xcodebuild build -project Mupen64Plus/Mupen64Plus.xcodeproj \
+              -target Mupen64Plus "${common[@]}"
+            exit 0
+          fi
+
+          # Match the proven build-check scheme selection. Preparation removes
+          # only the explicit host BuildAction entry; Xcode can still include
+          # the host in its build graph. These edits stay in the CI checkout.
           case "$CORE" in
             DeSmuME|Dolphin) scheme="$CORE" ;;
             *)
@@ -136,11 +256,15 @@ jobs:
 
   mame:
     name: Package Intel core (MAME)
+    needs: plan
+    if: needs.plan.outputs.mame == 'true'
     runs-on: macos-26-intel
     timeout-minutes: 180
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
 
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -191,14 +315,32 @@ jobs:
 
   package:
     name: Assemble Intel test build
-    needs: [app, cores, mame]
+    needs: [plan, app, cores, mame]
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      (needs.app.result == 'success' || needs.app.result == 'skipped') &&
+      (needs.cores.result == 'success' || needs.cores.result == 'skipped') &&
+      (needs.mame.result == 'success' || needs.mame.result == 'skipped')
     runs-on: macos-26-intel
     timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+
+      - name: Download original Intel inputs
+        if: inputs.reuse_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: intel-*
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.reuse_run }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/IntelInputs
 
       - name: Download Intel inputs
+        if: needs.app.result == 'success' || needs.cores.result == 'success' || needs.mame.result == 'success'
         uses: actions/download-artifact@v4
         with:
           pattern: intel-*
@@ -207,7 +349,8 @@ jobs:
 
       - name: Unpack verified bundle inputs
         run: |
-          # Inputs come from this run only. Inspect paths before asking ditto
+          # All inputs were built from plan.source_sha, including recovered
+          # inputs. Inspect paths before asking ditto
           # to restore the executable modes and framework symlinks in each ZIP.
           stage=$(mktemp -d "$RUNNER_TEMP/IntelStaging.XXXXXX")
           mkdir "$stage/App" "$stage/Cores"
