@@ -23,18 +23,34 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Foundation
+import OpenEmuBase
 import OpenEmuSystem
+
+protocol GameInfoDatabase {
+    func executeQuery(_ sql: String) throws -> [[String : Any]]
+}
+
+extension OpenVGDB: GameInfoDatabase {}
 
 final class GameInfoHelper {
 
     static let shared = GameInfoHelper()
+
+    private let databaseOverride: GameInfoDatabase?
 
     /// Shared serial queue for all ROM info lookups.
     /// Previously a new queue was created per call, which allocates a kernel thread
     /// resource per ROM and can stall the thread pool during large library scans.
     private let lookupQueue = DispatchQueue(label: "org.openemu.OpenEmu.GameInfoHelper", qos: .userInitiated)
 
-    var database: OpenVGDB? {
+    init(database: GameInfoDatabase? = nil) {
+        databaseOverride = database
+    }
+
+    var database: GameInfoDatabase? {
+        if let databaseOverride {
+            return databaseOverride
+        }
         return OpenVGDB.shared.isAvailable ? OpenVGDB.shared : nil
     }
 
@@ -53,7 +69,7 @@ final class GameInfoHelper {
             // ScreenScraper credentials — resolved lazily so we don't hit the Keychain
             // on every ROM lookup (e.g. during a full library scan).
             lazy var hasSScredentials: Bool = {
-                let user = UserDefaults.standard.string(forKey: "ScreenScraperUsername") ?? ""
+                let user = OEPreferences.shared.string(forKey: "ScreenScraperUsername") ?? ""
                 guard !user.isEmpty else { return false }
                 return OECredentialStore.shared.has(.screenScraperPassword)
             }()

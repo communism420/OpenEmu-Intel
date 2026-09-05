@@ -23,11 +23,38 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Foundation
+import OpenEmuBase
 import OpenEmuKit
 import Sparkle.SUStandardVersionComparator
 import OSLog
 
 final class CoreUpdater: NSObject {
+
+    private static let armOnlyCoreFeedPrefixes = [
+        "https://raw.githubusercontent.com/OpenEmu-Silicon/OpenEmu-Silicon/",
+        "https://raw.githubusercontent.com/communism420/OpenEmu-Intel/"
+    ]
+    private static let intelCoreListURL = URL(string: "https://raw.githubusercontent.com/OpenEmu/OpenEmu-Update/master/oecores.xml")!
+
+    private static var coreListURL: URL {
+#if arch(x86_64)
+        // OpenEmu-Silicon's published core archives are arm64-only. The original
+        // OpenEmu catalog remains the safe source of prebuilt Intel cores.
+        intelCoreListURL
+#else
+        URL(string: Bundle.main.infoDictionary!["OECoreListURL"] as! String)!
+#endif
+    }
+
+    private static func canUseCoreFeed(_ url: URL) -> Bool {
+#if arch(x86_64)
+        // Installed fork-only cores may still carry an arm64 appcast URL in
+        // their Info.plist. Never replace a working Intel core with that asset.
+        !armOnlyCoreFeedPrefixes.contains { url.absoluteString.hasPrefix($0) }
+#else
+        true
+#endif
+    }
     
     enum Errors: Error {
         case noDownloadableCoreForIdentifierError
@@ -52,9 +79,7 @@ final class CoreUpdater: NSObject {
     
     // Backup directory
     private var coresDirectory: URL {
-        let paths = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)
-        let appSupportDir = URL(fileURLWithPath: paths.first!).appendingPathComponent("OpenEmu")
-        return appSupportDir.appendingPathComponent("Cores")
+        URL.oeApplicationSupportDirectory.appendingPathComponent("Cores", isDirectory: true)
     }
     
     override init() {
@@ -91,7 +116,8 @@ final class CoreUpdater: NSObject {
             // rewritten by `AppDelegate.refreshStaleCoreFeedURLs()` at launch,
             // but the rewrite only takes effect from the *next* launch onwards.
             if let appcastURLString = plugin.infoDictionary["SUFeedURL"] as? String,
-               let feedURL = URL(string: appcastURLString) {
+               let feedURL = URL(string: appcastURLString),
+               Self.canUseCoreFeed(feedURL) {
                 checkForUpdateInformation(url: feedURL, plugin: plugin) { item in
                     DispatchQueue.main.async {
                         self.updaterDidFindValidUpdate(for: plugin, item: item)
@@ -104,7 +130,7 @@ final class CoreUpdater: NSObject {
     private func checkForUpdateInformation(url: URL, plugin: OECorePlugin, handler: @escaping (CoreAppcastItem) -> Void) {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.oeShared.dataTask(with: request) { data, response, error in
             if let error {
                 if #available(macOS 11.0, *) {
                     Logger.download.error("Failed to download \(url, privacy: .public): \(error, privacy: .public)")
@@ -173,11 +199,11 @@ final class CoreUpdater: NSObject {
             return
         }
         
-        let coreListURL = URL(string: Bundle.main.infoDictionary!["OECoreListURL"] as! String)!
+        let coreListURL = Self.coreListURL
         
         var coreListRequest = URLRequest(url: coreListURL)
         coreListRequest.cachePolicy = .reloadIgnoringLocalCacheData
-        lastCoreListURLTask = URLSession.shared.dataTask(with: coreListRequest) { data, response, error in
+        lastCoreListURLTask = URLSession.oeShared.dataTask(with: coreListRequest) { data, response, error in
             defer {
                 DispatchQueue.main.async {
                     if error == nil {
@@ -314,7 +340,7 @@ final class CoreUpdater: NSObject {
                 // Check if a core is set as default in AppDelegate
                 var defaultCore: CoreDownload?
                 let key = "defaultCore.\(systemIdentifier)"
-                if let defaultCoreID = UserDefaults.standard.string(forKey: key) {
+                if let defaultCoreID = OEPreferences.shared.string(forKey: key) {
                     defaultCore = validPlugins.first(where: { defaultCoreID.caseInsensitiveCompare($0.bundleIdentifier) == .orderedSame })
                 }
                 
@@ -395,46 +421,37 @@ final class CoreUpdater: NSObject {
     
     // MARK: -
     
-    func backupCore(bundleID: String) {
-        let fileManager = FileManager.default
-        let coreURL = coresDirectory.appendingPathComponent("\(bundleID).oecoreplugin")
-        let backupURL = coresDirectory.appendingPathComponent("\(bundleID).oecoreplugin.bak")
-        
-        // Remove existing backup if any
-        try? fileManager.removeItem(at: backupURL)
-        
-        // Copy current core to backup if it exists
-        if fileManager.fileExists(atPath: coreURL.path) {
-            do {
-                try fileManager.copyItem(at: coreURL, to: backupURL)
-                if #available(macOS 11.0, *) {
-                    Logger.download.info("Backed up core \(bundleID) to \(backupURL.lastPathComponent)")
-                }
-            } catch {
-                if #available(macOS 11.0, *) {
-                    Logger.download.error("Failed to backup core \(bundleID): \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    
     func revertCore(bundleID: String, completionHandler: @escaping (Error?) -> Void) {
         let fileManager = FileManager.default
-        let coreURL = coresDirectory.appendingPathComponent("\(bundleID).oecoreplugin")
         let backupURL = coresDirectory.appendingPathComponent("\(bundleID).oecoreplugin.bak")
         
-        guard fileManager.fileExists(atPath: backupURL.path) else {
+        guard let plugin = OECorePlugin.corePlugin(bundleIdentifier: bundleID),
+              plugin.url.deletingLastPathComponent().standardizedFileURL == coresDirectory.standardizedFileURL,
+              fileManager.fileExists(atPath: backupURL.path) else {
             completionHandler(NSError(domain: "OpenEmu", code: 404, userInfo: [NSLocalizedDescriptionKey: "No backup found"]))
             return
         }
         
         do {
-            try? fileManager.removeItem(at: coreURL)
-            try fileManager.moveItem(at: backupURL, to: coreURL)
+            guard let backupIdentifier = Bundle(url: backupURL)?.bundleIdentifier,
+                  backupIdentifier.caseInsensitiveCompare(bundleID) == .orderedSame else {
+                throw NSError(
+                    domain: "OpenEmu",
+                    code: 409,
+                    userInfo: [NSLocalizedDescriptionKey: "The core backup has an unexpected bundle identifier."]
+                )
+            }
+            try CoreDownload.validateRunningArchitecture(of: backupURL)
+
+            // The core's product name and bundle identifier are not always the
+            // same, so replace the plugin at its real installed URL.
+            _ = try fileManager.replaceItemAt(plugin.url, withItemAt: backupURL)
+            plugin.flushBundleCache()
             completionHandler(nil)
             
             // Allow re-updating
             if let download = coresDict[bundleID.lowercased()] {
+                download.version = plugin.version
                 download.hasUpdate = true
                 updateCoreList()
             }
@@ -481,13 +498,6 @@ final class CoreUpdater: NSObject {
         }
         
         coreDownload = pluginDL
-        
-        // Backup before updating
-        if coreDownload?.hasUpdate == true {
-             if let bundleID = coreDownload?.bundleIdentifier {
-                 backupCore(bundleID: bundleID)
-             }
-        }
         
         coreDownload?.start()
     }
@@ -549,6 +559,8 @@ extension CoreUpdater: CoreDownloadDelegate {
     
     func coreDownloadDidFail(_ download: CoreDownload, withError error: Error?) {
         updateCoreList()
+
+        download.removeObserver(self, forKeyPath: #keyPath(CoreDownload.progress), context: &CoreDownloadProgressContext)
         
         if download == coreDownload {
             failInstallWithError(error)
@@ -606,7 +618,7 @@ private final class CoreAppcast {
         let url = url
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.oeShared.dataTask(with: request) { data, response, error in
             defer { handler?() }
             
             guard let data else { return }

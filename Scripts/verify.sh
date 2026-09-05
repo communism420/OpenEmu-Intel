@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify.sh — Autonomous verification floor for OpenEmu-Silicon
+# verify.sh — Autonomous verification floor for OpenEmu
 #
 # Usage:
 #   ./Scripts/verify.sh                        # build + analyze + plist + codesign on the main app
@@ -9,6 +9,10 @@
 #   ./Scripts/verify.sh --core <CoreName> --release  # use Release configuration (for Release-only bugs)
 #   ./Scripts/verify.sh --core <CoreName> --launch
 #   ./Scripts/verify.sh --worktree             # build to ~/Builds/openemu/<branch>/ for stable permissions
+#   ./Scripts/verify.sh --arch x86_64           # verify a specific CPU architecture (default: current Mac)
+#   ./Scripts/verify.sh --derived-data <folder> # use only this existing build directory; do not prune other builds
+#   ./Scripts/verify.sh --data-folder <folder>  # use this existing folder for core installs / smoke launch
+#   ./Scripts/verify.sh --ad-hoc-sign           # sign locally without an Apple developer account (still verifies signatures)
 #
 # When run inside a git worktree (or with --worktree), the script builds and
 # locates artifacts at ~/Builds/openemu/<branch>/ so macOS privacy permissions
@@ -24,7 +28,7 @@
 #     script prefers the combined scheme but falls back to the bare name. If --core <Name>
 #     fails to find a scheme, fall back to building manually with the explicit combined name:
 #         xcodebuild -workspace OpenEmu-metal.xcworkspace -scheme 'OpenEmu + <Name>' \
-#           -configuration Debug -destination 'platform=macOS,arch=arm64' build
+#           -configuration Debug -destination "platform=macOS,arch=$(uname -m)" build
 #         Scripts/install-core.sh <Name>
 #     This has been observed with FCEU specifically.
 #   - --test: requires the OpenEmu scheme (which has the test target wired up). Do not pass
@@ -67,32 +71,88 @@ cd "$REPO_ROOT"
 WORKSPACE="OpenEmu-metal.xcworkspace"
 APP_PLIST="OpenEmu/OpenEmu-Info.plist"
 APP_ENTITLEMENTS="OpenEmu/OpenEmu.entitlements"
-INSTALLED_APP_DEFAULT="$HOME/Library/Application Support/OpenEmu"
 
 LAUNCH=0
 CORE=""
 RUN_TESTS=0
 WORKTREE=0
 CONFIG="Debug"
+TARGET_ARCH="${OPENEMU_ARCH:-$(uname -m)}"
 FAILURES=0
+DERIVED_DATA=""
+BUILD_DIR_OVERRIDE=""
+DATA_FOLDER=""
+AD_HOC_SIGN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --launch) LAUNCH=1; shift ;;
-    --core) CORE="${2:-}"; shift 2 ;;
+    --core)
+      [ $# -ge 2 ] && [ -n "$2" ] || { echo "--core requires a core name" >&2; exit 2; }
+      CORE="$2"
+      shift 2
+      ;;
     --test) RUN_TESTS=1; shift ;;
     --worktree) WORKTREE=1; shift ;;
     --debug) CONFIG="Debug"; shift ;;
     --release) CONFIG="Release"; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    --derived-data|--data-folder)
+      OPTION="$1"
+      if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
+        echo "$OPTION requires an existing directory" >&2
+        exit 2
+      fi
+      if [ "$OPTION" = --derived-data ]; then
+        [ -z "$DERIVED_DATA" ] || { echo "--derived-data may only be specified once" >&2; exit 2; }
+        DERIVED_DATA="$2"
+      else
+        [ -z "$DATA_FOLDER" ] || { echo "--data-folder may only be specified once" >&2; exit 2; }
+        DATA_FOLDER="$2"
+      fi
+      shift 2
+      ;;
+    --ad-hoc-sign) AD_HOC_SIGN=1; shift ;;
+    --arch)
+      [ $# -ge 2 ] && [ -n "$2" ] || { echo "--arch requires arm64 or x86_64" >&2; exit 2; }
+      TARGET_ARCH="$2"
+      shift 2
+      ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
+case "$TARGET_ARCH" in
+  arm64|x86_64) ;;
+  *) echo "unsupported architecture: $TARGET_ARCH (expected arm64 or x86_64)" >&2; exit 2 ;;
+esac
+
+if [ -n "$CORE" ] && ! [[ "$CORE" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+  echo "invalid core name: $CORE" >&2
+  exit 2
+fi
+if [ -n "$DERIVED_DATA" ]; then
+  [ "$WORKTREE" -eq 0 ] || { echo "use either --derived-data or --worktree, not both" >&2; exit 2; }
+  [ -d "$DERIVED_DATA" ] || { echo "--derived-data is not an existing directory: $DERIVED_DATA" >&2; exit 2; }
+  DERIVED_DATA=$(cd "$DERIVED_DATA" && pwd -P) || exit 2
+  BUILD_DIR_OVERRIDE="$DERIVED_DATA"
+fi
+if [ -n "$DATA_FOLDER" ]; then
+  [ -d "$DATA_FOLDER" ] || { echo "--data-folder is not an existing directory: $DATA_FOLDER" >&2; exit 2; }
+  DATA_FOLDER=$(cd "$DATA_FOLDER" && pwd -P) || exit 2
+  [ "$DATA_FOLDER" != / ] || { echo "the filesystem root cannot be an OpenEmu data folder" >&2; exit 2; }
+fi
+
+INSTALL_DATA_FOLDER=""
+if [ -n "$CORE" ]; then
+  source "$SCRIPT_DIR/core-data-folder.sh"
+  INSTALL_DATA_FOLDER=$(oe_core_data_folder "$DATA_FOLDER") || exit 2
+fi
+
 # Auto-detect worktree if not explicitly set.
 # `git rev-parse --show-superproject-working-tree` returns non-empty for submodules; use a different signal.
 # A linked worktree has its .git as a *file* (pointing into the main repo's .git/worktrees/), not a directory.
-if [ "$WORKTREE" -eq 0 ] && [ -f .git ]; then
+if [ -z "$DERIVED_DATA" ] && [ "$WORKTREE" -eq 0 ] && [ -f .git ]; then
   WORKTREE=1
 fi
 
@@ -119,7 +179,7 @@ info() { echo "----  $1"; }
 # the default DerivedData location.
 wait_for_build_db() {
   local db_path
-  if [ "${WORKTREE:-0}" -eq 1 ] && [ -n "${BUILD_DIR_OVERRIDE:-}" ]; then
+  if [ -n "${BUILD_DIR_OVERRIDE:-}" ]; then
     db_path="$BUILD_DIR_OVERRIDE/Build/Intermediates.noindex/XCBuildData/build.db"
   else
     db_path=$(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 7 \
@@ -144,7 +204,7 @@ wait_for_build_db() {
 # hash changes, leaving old dirs behind. Keeping only the newest means that
 # `open ... OpenEmu-metal-*/...` globs never accidentally open multiple apps.
 # Worktree builds go to ~/Builds/openemu/<branch>/ and are unaffected.
-if [ "$WORKTREE" -eq 0 ]; then
+if [ -z "$BUILD_DIR_OVERRIDE" ]; then
   DD="$HOME/Library/Developer/Xcode/DerivedData"
   pruned=0
   newest=""
@@ -189,23 +249,30 @@ if [ -n "$CORE" ]; then
   else
     SCHEME="$CORE"
   fi
-  info "Building core scheme: $SCHEME"
+  info "Building core scheme: $SCHEME ($TARGET_ARCH)"
 else
   SCHEME="OpenEmu"
-  info "Building main app scheme: $SCHEME"
+  info "Building main app scheme: $SCHEME ($TARGET_ARCH)"
 fi
 
 BUILD_LOG=$(mktemp -t verify_build.XXXXXX)
 XCODEBUILD_ARGS=(-workspace "$WORKSPACE" -scheme "$SCHEME"
-                 -configuration "$CONFIG" -destination 'platform=macOS,arch=arm64')
-if [ "$WORKTREE" -eq 1 ]; then
+                 -configuration "$CONFIG" -destination "platform=macOS,arch=$TARGET_ARCH"
+                 ARCHS="$TARGET_ARCH" ONLY_ACTIVE_ARCH=YES)
+if [ -n "$BUILD_DIR_OVERRIDE" ]; then
   XCODEBUILD_ARGS+=(-derivedDataPath "$BUILD_DIR_OVERRIDE")
-  info "worktree mode — building to $BUILD_DIR_OVERRIDE"
+  info "building to $BUILD_DIR_OVERRIDE"
+fi
+if [ "$AD_HOC_SIGN" -eq 1 ]; then
+  XCODEBUILD_ARGS+=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-
+                   CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=)
 fi
 
 wait_for_build_db
 
+BUILD_SUCCEEDED=0
 if xcodebuild "${XCODEBUILD_ARGS[@]}" build > "$BUILD_LOG" 2>&1; then
+  BUILD_SUCCEEDED=1
   pass "build ($SCHEME)"
 else
   fail "build ($SCHEME) — see $BUILD_LOG (last 30 lines below)"
@@ -258,21 +325,21 @@ done
 
 # --- Locate the built artifact and codesign verify ---------------------------
 
-if [ "$WORKTREE" -eq 1 ]; then
+if [ -n "$BUILD_DIR_OVERRIDE" ]; then
   ARTIFACT_BASE="$BUILD_DIR_OVERRIDE"
 else
   ARTIFACT_BASE="$HOME/Library/Developer/Xcode/DerivedData"
 fi
 
 if [ -z "$CORE" ]; then
-  if [ "$WORKTREE" -eq 1 ]; then
+  if [ -n "$BUILD_DIR_OVERRIDE" ]; then
     ARTIFACT="$ARTIFACT_BASE/Build/Products/${CONFIG}/OpenEmu.app"
     [ -e "$ARTIFACT" ] || ARTIFACT=""
   else
     ARTIFACT=$(find "$ARTIFACT_BASE" -maxdepth 5 -path "*OpenEmu-metal-*/Build/Products/${CONFIG}/OpenEmu.app" -print -quit 2>/dev/null)
   fi
 else
-  if [ "$WORKTREE" -eq 1 ]; then
+  if [ -n "$BUILD_DIR_OVERRIDE" ]; then
     ARTIFACT="$ARTIFACT_BASE/Build/Products/${CONFIG}/${CORE}.oecoreplugin"
     [ -e "$ARTIFACT" ] || ARTIFACT=""
   else
@@ -280,10 +347,18 @@ else
   fi
 fi
 
+ARTIFACT_ARCH_OK=0
 if [ -z "$ARTIFACT" ] || [ ! -e "$ARTIFACT" ]; then
   fail "locate built artifact (expected in DerivedData)"
 else
   info "artifact: $ARTIFACT"
+  if ./Scripts/verify-bundle-architectures.sh --arch "$TARGET_ARCH" "$ARTIFACT" >/dev/null 2>&1; then
+    ARTIFACT_ARCH_OK=1
+    pass "all bundle binaries contain $TARGET_ARCH"
+  else
+    fail "bundle contains binaries incompatible with $TARGET_ARCH"
+    ./Scripts/verify-bundle-architectures.sh --arch "$TARGET_ARCH" "$ARTIFACT" || true
+  fi
   if codesign --verify --deep --strict "$ARTIFACT" 2>/dev/null; then
     pass "codesign --verify --deep --strict"
   else
@@ -294,12 +369,20 @@ fi
 
 # --- Core install + post-install verification --------------------------------
 
-if [ -n "$CORE" ] && [ -n "${ARTIFACT:-}" ] && [ -e "$ARTIFACT" ]; then
-  INSTALL_DEST="$INSTALLED_APP_DEFAULT/Cores/${CORE}.oecoreplugin"
+if [ -n "$CORE" ] && [ "$BUILD_SUCCEEDED" -eq 1 ] && [ "$ARTIFACT_ARCH_OK" -eq 1 ] \
+   && [ "$TARGET_ARCH" = "$(uname -m)" ]; then
+  INSTALL_DEST="$INSTALL_DATA_FOLDER/Cores/${CORE}.oecoreplugin"
   CONFIG_FLAG="--$(echo "$CONFIG" | tr '[:upper:]' '[:lower:]')"
+  CORE_SCRIPT_ARGS=("$CORE" "$CONFIG_FLAG")
+  if [ -n "$DATA_FOLDER" ]; then
+    CORE_SCRIPT_ARGS+=(--data-folder "$DATA_FOLDER")
+  fi
+  if [ -n "$BUILD_DIR_OVERRIDE" ]; then
+    CORE_SCRIPT_ARGS+=(--derived-data "$BUILD_DIR_OVERRIDE")
+  fi
   if [ -x "./Scripts/install-core.sh" ]; then
     info "installing core via Scripts/install-core.sh ($CONFIG)"
-    if ./Scripts/install-core.sh "$CORE" "$CONFIG_FLAG" >/dev/null 2>&1; then
+    if ./Scripts/install-core.sh "${CORE_SCRIPT_ARGS[@]}" >/dev/null 2>&1; then
       pass "install-core.sh $CORE $CONFIG_FLAG"
     else
       fail "install-core.sh $CORE $CONFIG_FLAG"
@@ -320,13 +403,19 @@ if [ -n "$CORE" ] && [ -n "${ARTIFACT:-}" ] && [ -e "$ARTIFACT" ]; then
   # just built. This catches silent install failures (e.g. OpenEmu still
   # holding the binary open) that the codesign check above would not.
   if [ -x "./Scripts/verify-core-installed.sh" ]; then
-    if ./Scripts/verify-core-installed.sh "$CORE" "$CONFIG_FLAG" >/dev/null 2>&1; then
+    if ./Scripts/verify-core-installed.sh "${CORE_SCRIPT_ARGS[@]}" >/dev/null 2>&1; then
       pass "verify-core-installed.sh $CORE $CONFIG_FLAG"
     else
       fail "verify-core-installed.sh $CORE $CONFIG_FLAG — installed plugin does not match build"
-      ./Scripts/verify-core-installed.sh "$CORE" "$CONFIG_FLAG" || true
+      ./Scripts/verify-core-installed.sh "${CORE_SCRIPT_ARGS[@]}" || true
     fi
   fi
+fi
+
+if [ -n "$CORE" ] && { [ "$BUILD_SUCCEEDED" -ne 1 ] || [ "$ARTIFACT_ARCH_OK" -ne 1 ]; }; then
+  info "skipping core installation because the build or architecture check failed"
+elif [ -n "$CORE" ] && [ "$TARGET_ARCH" != "$(uname -m)" ]; then
+  info "skipping core installation for non-native $TARGET_ARCH artifact"
 fi
 
 # --- Optional smoke launch -----------------------------------------------
@@ -337,7 +426,11 @@ if [ "$LAUNCH" -eq 1 ] && [ -z "$CORE" ] && [ -n "${ARTIFACT:-}" ] && [ -e "$ART
   else
     info "smoke launching (staying open for manual testing after health checks)"
     LAUNCH_START=$(date +"%Y-%m-%d %H:%M:%S")
-    open "$ARTIFACT"
+    if [ -n "$DATA_FOLDER" ]; then
+      open "$ARTIFACT" --args --data-folder "$DATA_FOLDER"
+    else
+      open "$ARTIFACT"
+    fi
     sleep 5
 
     if pgrep -x OpenEmu >/dev/null 2>&1; then
@@ -374,11 +467,7 @@ fi
 if [ "$RUN_TESTS" -eq 1 ] && [ -z "$CORE" ]; then
   info "running OpenEmuTests (xcodebuild test)"
   TEST_LOG=$(mktemp -t verify_test.XXXXXX)
-  if xcodebuild test \
-       -workspace "$WORKSPACE" \
-       -scheme OpenEmu \
-       -configuration Debug \
-       -destination 'platform=macOS,arch=arm64' \
+  if xcodebuild "${XCODEBUILD_ARGS[@]}" test \
        > "$TEST_LOG" 2>&1; then
     PASS_COUNT=$(grep -c 'passed' "$TEST_LOG" 2>/dev/null || true)
     pass "OpenEmuTests ($PASS_COUNT tests passed)"
@@ -403,7 +492,7 @@ if [ "$FAILURES" -eq 0 ]; then
   # re-running a second full build, which is what causes concurrent-xcodebuild
   # pile-ups. Only stamp for full app Debug runs so partial checks can't trick it.
   if [ -z "$CORE" ] && [ "$CONFIG" = "Debug" ]; then
-    STAMP_FILE=$(git rev-parse --git-path verify-passed 2>/dev/null || true)
+    STAMP_FILE=$(git rev-parse --git-path "verify-passed-$TARGET_ARCH" 2>/dev/null || true)
     if [ -n "$STAMP_FILE" ]; then
       TREE_SHA=$(git rev-parse HEAD^{tree} 2>/dev/null || echo "")
       if [ -n "$TREE_SHA" ]; then

@@ -25,17 +25,35 @@
  */
 
 import Cocoa
+import OpenEmuBase
 import Sentry
 
 enum SentryService {
 
-    private static let dsn = "https://387777a8153aae33cb514deea3601946@o4511164820815872.ingest.us.sentry.io/4511164891529216"
+    /// Crash reporting is disabled unless this fork's maintainer supplies a DSN
+    /// in OpenEmu-Info.plist. Never send fork users' data to an inherited
+    /// upstream project.
+    private static var dsn: String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "OESentryDSN") as? String else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static var releasePrefix: String {
+        let value = Bundle.main.object(forInfoDictionaryKey: "OESentryReleasePrefix") as? String
+        return value?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? "openemu-intel"
+    }
 
     // UserDefaults keys
-    private static let consentKey    = "OESentryCrashReportingEnabled"
-    private static let hasPromptedKey = "OESentryCrashReportingPrompted"
+    // Fork-specific keys ensure a consent decision made for another project's
+    // telemetry endpoint is never silently reused here.
+    private static let consentKey    = "OEIntelSentryCrashReportingEnabled"
+    private static let hasPromptedKey = "OEIntelSentryCrashReportingPrompted"
 
-    // Game-context keys mirrored into CFPreferences so the helper process
+    // Game-context keys saved in Settings.plist so the helper process
     // (which crashes most often) can attach the same context to its events.
     private static let ctxGameKey   = "OESentryActiveGame"
     private static let ctxSystemKey = "OESentryActiveSystem"
@@ -45,7 +63,9 @@ enum SentryService {
     /// On first launch, shows a consent prompt. On subsequent launches,
     /// starts Sentry automatically if the user previously opted in.
     static func configureIfNeeded() {
-        let defaults = UserDefaults.standard
+        guard dsn != nil else { return }
+
+        let defaults = OEPreferences.shared
 
         if !defaults.bool(forKey: hasPromptedKey) {
             showConsentPrompt()
@@ -69,10 +89,8 @@ enum SentryService {
                 "core": coreIdentifier,
             ], key: "emulation")
         }
-        // Mirror into CFPrefs so the helper process picks up the same context
-        // when it starts Sentry. Synchronize forces the write to disk before
-        // the helper launches.
-        let defaults = UserDefaults.standard
+        // Save before the helper starts. File-backed setters are synchronous.
+        let defaults = OEPreferences.shared
         defaults.set(gameName,         forKey: ctxGameKey)
         defaults.set(systemIdentifier, forKey: ctxSystemKey)
         defaults.set(coreIdentifier,   forKey: ctxCoreKey)
@@ -84,7 +102,7 @@ enum SentryService {
         SentrySDK.configureScope { scope in
             scope.removeContext(key: "emulation")
         }
-        let defaults = UserDefaults.standard
+        let defaults = OEPreferences.shared
         defaults.removeObject(forKey: ctxGameKey)
         defaults.removeObject(forKey: ctxSystemKey)
         defaults.removeObject(forKey: ctxCoreKey)
@@ -149,19 +167,22 @@ enum SentryService {
     }
 
     private static func persistConsent(_ opted: Bool) {
-        let defaults = UserDefaults.standard
+        let defaults = OEPreferences.shared
         defaults.set(opted, forKey: consentKey)
         defaults.set(true,  forKey: hasPromptedKey)
         if opted { start() }
     }
 
     private static func start() {
+        guard let dsn else { return }
+
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let build   = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
         SentrySDK.start { options in
+            options.cacheDirectoryPath = OEStoragePaths.cachesURL.appendingPathComponent("Sentry/App", isDirectory: true).path
             options.dsn              = dsn
             options.debug            = false
-            options.releaseName      = "openemu-silicon@\(version)+\(build)"
+            options.releaseName      = "\(releasePrefix)@\(version)+\(build)"
             options.environment      = "production"
             options.tracesSampleRate = 0.2  // sample 20% of sessions for performance tracing
             options.enableLogs       = true
@@ -170,4 +191,8 @@ enum SentryService {
             options.enableMetricKit  = true
         }
     }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

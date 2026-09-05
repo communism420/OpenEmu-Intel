@@ -38,6 +38,7 @@
 			dependencies = (
 				87F077B023B68C64001FFC9B /* PBXTargetDependency */,
 				87FBC0C21BFC7A0000AECF5A /* PBXTargetDependency */,
+				87FBC0A81C07996B00AECF5A /* PBXTargetDependency */,
 				873A363E1FE233BA0004D81D /* PBXTargetDependency */,
 				87BD9E231C2A6652006722DF /* PBXTargetDependency */,
 				87BD9E211C2A663B006722DF /* PBXTargetDependency */,
@@ -355,6 +356,7 @@
 		87FBC0821BFC76A000AECF5A /* Controller-Preferences.plist in Resources */ = {isa = PBXBuildFile; fileRef = 87FBC07C1BFC76A000AECF5A /* Controller-Preferences.plist */; };
 		87FBC0831BFC76A000AECF5A /* Keyboard-Mappings.plist in Resources */ = {isa = PBXBuildFile; fileRef = 87FBC07D1BFC76A000AECF5A /* Keyboard-Mappings.plist */; };
 		87FBC0851BFC76E200AECF5A /* OpenEmuSystem.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C6D120C417112E1300E868A8 /* OpenEmuSystem.framework */; };
+		87FBC0941C0790B600AECF5A /* Atari 8bit.oesystemplugin in Copy System Plugins to App Plugins */ = {isa = PBXBuildFile; fileRef = 87FBC08E1C0790B400AECF5A /* Atari 8bit.oesystemplugin */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		87FBC0951C07929D00AECF5A /* OpenEmuSystem.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C6D120C417112E1300E868A8 /* OpenEmuSystem.framework */; };
 		87FBC09A1C0796B800AECF5A /* OEA8SystemResponder.m in Sources */ = {isa = PBXBuildFile; fileRef = 87FBC0981C0796B800AECF5A /* OEA8SystemResponder.m */; };
 		87FBC0A21C07985900AECF5A /* Keyboard-Mappings.plist in Resources */ = {isa = PBXBuildFile; fileRef = 87FBC0A11C07985900AECF5A /* Keyboard-Mappings.plist */; };
@@ -408,6 +410,7 @@
 		8F99F816256BF358007B83E1 /* SidebarController.xib in Resources */ = {isa = PBXBuildFile; fileRef = 8F99F815256BF358007B83E1 /* SidebarController.xib */; };
 		8FA87C5A2725F25500B65986 /* SQLiteDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836BC9561853815A00B6AF26 /* SQLiteDatabase.swift */; };
 		8FAD320225B31FB100323020 /* URL+OEAdditions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FAD320125B31FB000323020 /* URL+OEAdditions.swift */; };
+		DADAF01D2026090500000001 /* OEDataFolderSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = DADAF01D2026090500000002 /* OEDataFolderSetup.swift */; };
 		8FAF08D8251FB65D00EDB247 /* HoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FAF069A251FB02700EDB247 /* HoverButton.swift */; };
 		8FB8A29526E296BD00F2B626 /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8306CD1F1BD3AC3D0025BC6C /* SidebarItem.swift */; };
 		8FBAE60C254BA0D300446C3B /* OEControls.strings in Resources */ = {isa = PBXBuildFile; fileRef = 8FBAE60E254BA0D300446C3B /* OEControls.strings */; };
@@ -908,6 +911,13 @@
 			remoteGlobalIDString = 94CEB26C17A84809005A2107;
 			remoteInfo = GameCube;
 		};
+		87FBC0A71C07996B00AECF5A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2A37F4A9FDCFA73011CA2CEA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 87FBC08D1C0790B400AECF5A;
+			remoteInfo = "Atari 8bit";
+		};
 		87FBC0C11BFC7A0000AECF5A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 2A37F4A9FDCFA73011CA2CEA /* Project object */;
@@ -1091,6 +1101,7 @@
 				87BD9E251C2A66BC006722DF /* Atari 7800.oesystemplugin in Copy System Plugins to App Plugins */,
 				1BB9BDE24AAA476991EB4F41 /* Arcade.oesystemplugin in Copy System Plugins to App Plugins */,
 				87BD9E241C2A66B1006722DF /* Atari 5200.oesystemplugin in Copy System Plugins to App Plugins */,
+				87FBC0941C0790B600AECF5A /* Atari 8bit.oesystemplugin in Copy System Plugins to App Plugins */,
 				946C7ABB19EE4AF4000F9466 /* Atari 2600.oesystemplugin in Copy System Plugins to App Plugins */,
 				94CEB29C17A8D507005A2107 /* Sega 32X.oesystemplugin in Copy System Plugins to App Plugins */,
 				940553B917A35FB4009B505D /* PC Engine.oesystemplugin in Copy System Plugins to App Plugins */,
@@ -1567,6 +1578,7 @@
 		8F957B4125227175008A9BC9 /* GlossButton.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GlossButton.swift; sourceTree = "<group>"; };
 		8F99F815256BF358007B83E1 /* SidebarController.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = SidebarController.xib; sourceTree = "<group>"; };
 		8FAD320125B31FB000323020 /* URL+OEAdditions.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "URL+OEAdditions.swift"; sourceTree = "<group>"; };
+		DADAF01D2026090500000002 /* OEDataFolderSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OEDataFolderSetup.swift; sourceTree = "<group>"; };
 		8FAF069A251FB02700EDB247 /* HoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HoverButton.swift; sourceTree = "<group>"; };
 		8FBAE647254BA0DF00446C3B /* de */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/OEControls.strings; sourceTree = "<group>"; };
 		8FBAE9EA254BD7FA00446C3B /* NSControl+i18n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSControl+i18n.swift"; sourceTree = "<group>"; };
@@ -2744,6 +2756,7 @@
 				5A9606E31C0BA85F0089B494 /* NSURL+LibraryAdditions.swift */,
 				5A9606D51C0A7C9D0089B494 /* NSWindow+FullScreen.swift */,
 				8FAD320125B31FB000323020 /* URL+OEAdditions.swift */,
+				DADAF01D2026090500000002 /* OEDataFolderSetup.swift */,
 				05A002D323DE1006007F0DB7 /* UserDefaults+OEAdditions.swift */,
 				0544B6AB23D16E7A00F63D61 /* OEResponder.h */,
 				836BC9581853817500B6AF26 /* XADArchive+OE.h */,
@@ -6407,6 +6420,7 @@
 				5A79F7951C15F542003124D5 /* PreferencesWindowController.swift in Sources */,
 				059ECCC22524030D00DCA0F6 /* ShaderParametersWindowController.swift in Sources */,
 				8FAD320225B31FB100323020 /* URL+OEAdditions.swift in Sources */,
+				DADAF01D2026090500000001 /* OEDataFolderSetup.swift in Sources */,
 				05E789A723D01B16000E14EE /* GameDocumentController.swift in Sources */,
 				05E789AB23D0256D000E14EE /* NSBindingName+Additions.swift in Sources */,
 				0544B6A923D16DDC00F63D61 /* ScreenshotViewController.swift in Sources */,
@@ -6928,6 +6942,11 @@
 			target = 94CEB26C17A84809005A2107 /* GameCube */;
 			targetProxy = 87F077AF23B68C64001FFC9B /* PBXContainerItemProxy */;
 		};
+		87FBC0A81C07996B00AECF5A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 87FBC08D1C0790B400AECF5A /* Atari 8bit */;
+			targetProxy = 87FBC0A71C07996B00AECF5A /* PBXContainerItemProxy */;
+		};
 		87FBC0C21BFC7A0000AECF5A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 87FBC06C1BFC70FE00AECF5A /* Commodore 64 */;
@@ -7220,7 +7239,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.openemu.OEAlertTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG OEALERT_TEST";
 				SWIFT_OBJC_INTERFACE_HEADER_NAME = "OpenEmu-Swift.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -7250,6 +7269,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.openemu.OEAlertTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) OEALERT_TEST";
 				SWIFT_OBJC_INTERFACE_HEADER_NAME = "OpenEmu-Swift.h";
 				SWIFT_VERSION = 5.0;
 			};
