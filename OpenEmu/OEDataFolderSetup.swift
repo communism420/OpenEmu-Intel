@@ -322,9 +322,10 @@ enum OEDataFolderSetup {
 
 /// A small Cocoa-bindings adapter, not an NSUserDefaults subclass. Storyboard
 /// objects and programmatic bindings use the same file-backed values object.
+/// It owns no mutable or UI state; all values live in the lock-protected store.
+/// Accessing the adapter need not enter the main actor, including during deinit.
 @objc(OEPreferencesController)
-@MainActor
-final class OEPreferencesController: NSObject {
+final class OEPreferencesController: NSObject, @unchecked Sendable {
     @objc static let shared = OEPreferencesController()
     @objc dynamic var values: OEPreferences { .shared }
 }

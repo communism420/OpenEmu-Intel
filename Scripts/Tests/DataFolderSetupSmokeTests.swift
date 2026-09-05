@@ -172,6 +172,12 @@ private struct DataFolderSetupSmokeTests {
         let preferences = OEPreferences.shared
         preferences.register(defaults: ["controlFlag": false])
         let controller = OEPreferencesController.shared
+        DispatchQueue.concurrentPerform(iterations: 16) { @Sendable _ in
+            let concurrentController = OEPreferencesController.shared
+            check(concurrentController === controller && concurrentController.values === preferences
+                  && !concurrentController.values.bool(forKey: "controlFlag"),
+                  "immutable Cocoa adapter supports nonisolated concurrent access")
+        }
         let observer = BindingObserver()
         controller.addObserver(observer, forKeyPath: "values.controlFlag", options: [.old, .new], context: nil)
         preferences.set(true, forKey: "controlFlag")
@@ -187,8 +193,16 @@ private struct DataFolderSetupSmokeTests {
         check(button.state == .off, "bound checkbox reads initial setting")
         preferences.set(true, forKey: "controlFlag")
         check(button.state == .on, "bound checkbox sees file-backed setting changes")
+        button.performClick(nil)
+        check(button.state == .off && !preferences.bool(forKey: "controlFlag"),
+              "clicking the bound checkbox updates file-backed preferences")
+        let clickedSettings = try PropertyListSerialization.propertyList(
+            from: Data(contentsOf: preferencesRoot.appendingPathComponent("Settings.plist")),
+            options: [], format: nil) as? [String: Any]
+        check(clickedSettings?["controlFlag"] as? Bool == false,
+              "clicked checkbox value is persisted in Settings.plist")
         button.unbind(.value)
         check(preferences.synchronize(), "settings changes are persisted")
-        print("PASS: data-folder identity, path rebasing, Cocoa KVO adapter and checkbox binding")
+        print("PASS: data-folder identity, path rebasing, concurrent Cocoa adapter access, KVO and checkbox binding")
     }
 }
