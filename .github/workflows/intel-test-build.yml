@@ -118,16 +118,13 @@ jobs:
           CORE: ${{ matrix.core }}
         run: |
           release_dir="$RUNNER_TEMP/OpenEmuDerivedData/Build/Products/Release"
-          shopt -s nullglob
-          plugins=("$release_dir"/*.oecoreplugin)
-          if [ "${#plugins[@]}" -ne 1 ] || [ "${plugins[0]}" != "$release_dir/$CORE.oecoreplugin" ]; then
-            echo "::error::Expected exactly one Release plugin: $CORE.oecoreplugin"
-            printf '%s\n' "${plugins[@]}"
-            exit 1
-          fi
-          ./Scripts/verify-bundle-architectures.sh --arch x86_64 "${plugins[0]}"
-          codesign --verify --deep --strict "${plugins[0]}"
-          ditto -c -k --keepParent --norsrc "${plugins[0]}" "$RUNNER_TEMP/intel-core-$CORE.zip"
+          # Xcode can also produce OpenEmuLibretroBridge.oecoreplugin here.
+          # Select the requested native core, not every sibling build product.
+          plugin="$release_dir/$CORE.oecoreplugin"
+          test -d "$plugin/Contents"
+          ./Scripts/verify-bundle-architectures.sh --arch x86_64 "$plugin"
+          codesign --verify --deep --strict "$plugin"
+          ditto -c -k --keepParent --norsrc "$plugin" "$RUNNER_TEMP/intel-core-$CORE.zip"
 
       - name: Upload Intel core input
         uses: actions/upload-artifact@v4
@@ -178,16 +175,11 @@ jobs:
       - name: Verify and zip Intel MAME
         run: |
           release_dir="$GITHUB_WORKSPACE/MAME/build/XcodeDerived/Build/Products/Release"
-          shopt -s nullglob
-          plugins=("$release_dir"/*.oecoreplugin)
-          if [ "${#plugins[@]}" -ne 1 ] || [ "${plugins[0]}" != "$release_dir/MAME.oecoreplugin" ]; then
-            echo "::error::Expected exactly one Release plugin: MAME.oecoreplugin"
-            printf '%s\n' "${plugins[@]}"
-            exit 1
-          fi
-          ./Scripts/verify-bundle-architectures.sh --arch x86_64 "${plugins[0]}"
-          codesign --verify --deep --strict "${plugins[0]}"
-          ditto -c -k --keepParent --norsrc "${plugins[0]}" "$RUNNER_TEMP/intel-core-MAME.zip"
+          plugin="$release_dir/MAME.oecoreplugin"
+          test -d "$plugin/Contents"
+          ./Scripts/verify-bundle-architectures.sh --arch x86_64 "$plugin"
+          codesign --verify --deep --strict "$plugin"
+          ditto -c -k --keepParent --norsrc "$plugin" "$RUNNER_TEMP/intel-core-MAME.zip"
 
       - name: Upload Intel MAME input
         uses: actions/upload-artifact@v4
